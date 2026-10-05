@@ -7,12 +7,47 @@
   let deltaMm = "";
   let error = "";
   let loading = false;
+  let detail = null;
+  let detailId = null;
+  let detailError = "";
   let timer;
 
   $: isWriter = session?.role === "writer";
 
   function headers() {
     return session ? { Authorization: "Bearer " + session.token } : {};
+  }
+
+  // 真实读数：0.0 必须显示为 0，只有尚未入库的 null 才显示占位。
+  function formatMm(v) {
+    return v === null || v === undefined ? "—" : String(v);
+  }
+
+  async function loadDetail(id) {
+    detailId = id;
+    detailError = "";
+    try {
+      const res = await fetch(`/api/logs/${id}`, { headers: headers() });
+      if (res.status === 401) {
+        logout();
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        detailError = data.detail || "读取详情失败";
+        detail = null;
+        return;
+      }
+      detail = data;
+    } catch {
+      detailError = "详情网络异常";
+    }
+  }
+
+  function closeDetail() {
+    detail = null;
+    detailId = null;
+    detailError = "";
   }
 
   async function refresh() {
@@ -23,6 +58,8 @@
       return;
     }
     if (res.ok) logs = await res.json();
+    // 翻页/轮询刷新后，已打开的详情也重读，确认读数不凭空变空或变零。
+    if (detailId !== null) await loadDetail(detailId);
   }
 
   async function login() {
@@ -54,6 +91,8 @@
     if (timer) clearInterval(timer);
     session = null;
     logs = [];
+    detail = null;
+    detailId = null;
     localStorage.removeItem("tunnel_session");
   }
 
@@ -124,6 +163,10 @@
   .ok { background: #14532d; color: #86efac; }
   .bad { background: #7f1d1d; color: #fca5a5; }
   .pending { background: #713f12; color: #fde68a; }
+  button.link { padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+  .detail-title { font-size: 1rem; margin: 0 0 0.75rem; color: #fbbf24; }
+  .detail-grid { width: auto; margin-bottom: 0.75rem; }
+  .detail-grid th { width: 6rem; color: #a8a29e; font-weight: normal; }
 </style>
 
 <main>
@@ -157,14 +200,14 @@
     <section>
       <table>
         <thead>
-          <tr><th>编号</th><th>桩号</th><th>收敛mm</th><th>状态</th><th>结论</th><th>说明</th></tr>
+          <tr><th>编号</th><th>桩号</th><th>收敛mm</th><th>状态</th><th>结论</th><th>说明</th><th></th></tr>
         </thead>
         <tbody>
           {#each logs as row}
             <tr>
               <td>{row.id}</td>
               <td>{row.chainage}</td>
-              <td>{/* h03-trap-blank */}{row.delta_mm === 0 || row.delta_mm == null ? '' : row.delta_mm}</td>
+              <td>{formatMm(row.delta_mm)}</td>
               <td><span class="tag {row.status === 'pending' ? 'pending' : 'ok'}">{row.status === 'pending' ? '待处理' : '已完成'}</span></td>
               <td>
                 {#if row.verdict}
@@ -172,10 +215,33 @@
                 {:else}—{/if}
               </td>
               <td>{row.reason ?? "—"}</td>
+              <td><button class="secondary link" on:click={() => loadDetail(row.id)}>详情</button></td>
             </tr>
           {/each}
         </tbody>
       </table>
     </section>
+    {#if detailId !== null}
+      <section>
+        <h2 class="detail-title">读数详情 #{detailId}</h2>
+        {#if detailError}
+          <p class="err">{detailError}</p>
+        {:else if detail}
+          <table class="detail-grid">
+            <tbody>
+              <tr><th>桩号</th><td>{detail.chainage}</td></tr>
+              <tr><th>收敛mm</th><td>{formatMm(detail.delta_mm)}</td></tr>
+              <tr><th>状态</th><td>{detail.status === 'pending' ? '待处理' : '已完成'}</td></tr>
+              <tr><th>结论</th><td>{detail.verdict ?? "—"}</td></tr>
+              <tr><th>说明</th><td>{detail.reason ?? "—"}</td></tr>
+              <tr><th>提交人</th><td>{detail.created_by}</td></tr>
+            </tbody>
+          </table>
+        {:else}
+          <p class="sub">加载中…</p>
+        {/if}
+        <button class="secondary" on:click={closeDetail}>关闭详情</button>
+      </section>
+    {/if}
   {/if}
 </main>

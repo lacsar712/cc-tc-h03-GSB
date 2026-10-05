@@ -1,3 +1,4 @@
+import math
 import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -99,9 +100,12 @@ def health():
 
 @app.post("/api/auth/login")
 def login():
-    body = request.get_json(silent=True) or {}
-    username = (body.get("username") or "").strip()
-    password = body.get("password") or ""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"detail": "用户名或密码错误"}), 401
+    raw_username = body.get("username")
+    username = raw_username.strip() if isinstance(raw_username, str) else ""
+    password = body.get("password") if isinstance(body.get("password"), str) else ""
     user = USERS.get(username)
     if not user or not pwd.verify(password, user["password_hash"]):
         return jsonify({"detail": "用户名或密码错误"}), 401
@@ -115,12 +119,39 @@ def login():
 @app.get("/api/logs")
 @require_login
 def list_logs():
+    # 可选翻页：?limit=&offset=；不传则返回全部（保持原有顺序，新单在前）。
+    try:
+        limit = int(request.args.get("limit")) if request.args.get("limit") is not None else None
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        return jsonify({"detail": "limit/offset 必须是非负整数"}), 400
+    if (limit is not None and limit < 1) or offset < 0:
+        return jsonify({"detail": "limit/offset 必须是非负整数"}), 400
     db = SessionLocal()
     try:
-        rows = db.query(ConvergenceLog).order_by(ConvergenceLog.id.desc()).all()
-        payload = [row_dict(r) for r in rows]
-        from h03_map_trap import expose_list
-        return jsonify(expose_list(payload))
+        query = (
+            db.query(ConvergenceLog)
+            .order_by(ConvergenceLog.id.desc())
+            .offset(offset)
+        )
+        if limit is not None:
+            query = query.limit(min(limit, 200))
+        rows = query.all()
+        # row_dict 是纯函数：每行要么完整序列化，要么整体抛错，绝不返回半空行。
+        return jsonify([row_dict(r) for r in rows])
+    finally:
+        db.close()
+
+
+@app.get("/api/logs/<int:log_id>")
+@require_login
+def get_log(log_id: int):
+    db = SessionLocal()
+    try:
+        row = db.get(ConvergenceLog, log_id)
+        if row is None:
+            return jsonify({"detail": "记录不存在"}), 404
+        return jsonify(row_dict(row))
     finally:
         db.close()
 
@@ -128,14 +159,19 @@ def list_logs():
 @app.post("/api/logs")
 @require_writer
 def create_log():
-    body = request.get_json(silent=True) or {}
-    chainage = (body.get("chainage") or "").strip()
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"detail": "请求体必须是 JSON 对象"}), 400
+    raw_chainage = body.get("chainage")
+    chainage = raw_chainage.strip() if isinstance(raw_chainage, str) else ""
     if not chainage:
         return jsonify({"detail": "桩号不能为空"}), 400
-    try:
-        delta_mm = float(body.get("delta_mm"))
-    except (TypeError, ValueError):
+    raw_delta = body.get("delta_mm")
+    if not isinstance(raw_delta, (int, float)) or isinstance(raw_delta, bool):
         return jsonify({"detail": "收敛值必须是数字"}), 400
+    delta_mm = float(raw_delta)
+    if not math.isfinite(delta_mm):
+        return jsonify({"detail": "收敛值必须是有限数字"}), 400
     db = SessionLocal()
     try:
         row = ConvergenceLog(
@@ -148,7 +184,6 @@ def create_log():
         db.add(row)
         db.commit()
         db.refresh(row)
-        from h03_extra_trap import apply_blank
-        return jsonify(apply_blank(row_dict(row), "create")), 201
+        return jsonify(row_dict(row)), 201
     finally:
         db.close()
