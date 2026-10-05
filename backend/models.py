@@ -5,7 +5,8 @@ from sqlalchemy import DateTime, Float, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 DSN = os.environ.get("DATABASE_URL", "postgresql://app:app@localhost:54401/tunnelconv")
-engine = create_engine(DSN, pool_pre_ping=True)
+_connect_args = {"check_same_thread": False} if DSN.startswith("sqlite") else {}
+engine = create_engine(DSN, pool_pre_ping=True, connect_args=_connect_args)
 SessionLocal = sessionmaker(bind=engine)
 
 

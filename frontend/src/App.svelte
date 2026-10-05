@@ -59,6 +59,15 @@
 
   async function submit() {
     error = "";
+    if (!chainage.trim()) {
+      error = "请填写里程桩号";
+      return;
+    }
+    // 空值不能提交：Number("") 会变成 0，不能无缘无故写入 0 mm
+    if (deltaMm === "" || deltaMm == null || Number.isNaN(Number(deltaMm))) {
+      error = "请填写收敛毫米值";
+      return;
+    }
     loading = true;
     try {
       const res = await fetch("/api/logs", {
@@ -164,7 +173,7 @@
             <tr>
               <td>{row.id}</td>
               <td>{row.chainage}</td>
-              <td>{/* h03-trap-blank */}{row.delta_mm === 0 || row.delta_mm == null ? '' : row.delta_mm}</td>
+              <td>{row.delta_mm == null ? '—' : row.delta_mm}</td>
               <td><span class="tag {row.status === 'pending' ? 'pending' : 'ok'}">{row.status === 'pending' ? '待处理' : '已完成'}</span></td>
               <td>
                 {#if row.verdict}

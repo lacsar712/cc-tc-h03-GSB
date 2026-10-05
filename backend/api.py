@@ -7,6 +7,8 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from claimer import start as start_claimer
+from h03_extra_trap import apply_blank
+from h03_map_trap import expose_list
 from models import Base, ConvergenceLog, SessionLocal, engine, row_dict
 
 SECRET = os.environ.get("JWT_SECRET", "tunnelconv-dev-secret")
@@ -118,9 +120,7 @@ def list_logs():
     db = SessionLocal()
     try:
         rows = db.query(ConvergenceLog).order_by(ConvergenceLog.id.desc()).all()
-        payload = [row_dict(r) for r in rows]
-        from h03_map_trap import expose_list
-        return jsonify(expose_list(payload))
+        return jsonify(expose_list([row_dict(r) for r in rows]))
     finally:
         db.close()
 
@@ -148,7 +148,6 @@ def create_log():
         db.add(row)
         db.commit()
         db.refresh(row)
-        from h03_extra_trap import apply_blank
         return jsonify(apply_blank(row_dict(row), "create")), 201
     finally:
         db.close()
